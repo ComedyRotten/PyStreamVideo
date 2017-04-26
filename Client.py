@@ -2,6 +2,8 @@ from tkinter import *
 import tkinter.messagebox
 from struct import *
 from PIL import Image, ImageTk
+import cv2
+import numpy as np
 
 '''
 The RTSP protocol is only for commands from the client to the server.
@@ -117,6 +119,22 @@ class MediaGui(Frame):
         mysize = load.size
         mybytes = load.tobytes()
         print(mybytes) # Testing the conversion of a frame to bytes
+        cap = cv2.VideoCapture('orion_1.mpg')
+
+        while(cap.isOpened()):
+            ret, frame = cap.read()
+
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            # cv2.imshow('frame', gray)
+            # self.photo = PhotoImage(file="pic.png")
+            self.vid = Label(self.media_frame, image=frame)
+            self.vid.pack(fill=BOTH)
+
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+
+        cap.release()
+
         # newimg = Image.new(mymode, mysize)
         # decodedimage = newimg.frombytes(mybytes, decoder_name="raw")
 
