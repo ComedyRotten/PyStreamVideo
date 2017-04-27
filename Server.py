@@ -1,7 +1,9 @@
+import getopt
 import random
+from random import randint
 import socket
-import _thread
 import time
+import sys
 
 '''
 This is the server that sends a given file over a stream. It does nothing else.
@@ -24,7 +26,9 @@ class Server():
         self.rtimeout = timeout
 
         self.current_state = 0
-        self.current_seqno = 0
+        self.session_id = randint(0, 65535)
+        self.current_RTSP_seqno = 0
+        self.current_RTP_seqno = 0
 
         if filename == None:
             self.infile = sys.stdin
@@ -47,16 +51,20 @@ class Server():
                 pass
             elif self.current_state == 1:
                 # Setup the connection and prepare to send data
-                pass
+                print("SETUP")
+                # We are going with a static setup for testing, so nothing needed here
             elif self.current_state == 2:
                 # Play the video, begin sending the RTP packets
-                pass
+                print("PLAY")
+                self.send_next_frame()
             elif self.current_state == 3:
                 # Pause, stop sending the rtp packets
-                pass
+                print("PAUSE")
+                # Stop sending frames
             elif self.current_state == 4:
                 # Stop sending the RTP packets and teardown the connection
-                pass
+                print("TEARDOWN")
+                self.teardown()
             else:
                 # If the state is unrecognized, don't do anything
                 pass
@@ -74,16 +82,20 @@ class Server():
         pass
 
     def _handle_setup(self, seqno, session):
-        pass
+        self.current_state = 1
+        self.send(self.make_RTSP_packet('OK', seqno, self.session_id))
 
     def _handle_play(self, seqno, session):
-        pass
+        self.current_state = 2
+        self.send(self.make_RTSP_packet('OK', seqno, self.session_id))
 
     def _handle_pause(self, seqno, session):
-        pass
+        self.current_state = 3
+        self.send(self.make_RTSP_packet('OK', seqno, self.session_id))
 
     def _handle_teardown(self, seqno, session):
-        pass
+        self.current_state = 4
+        self.send(self.make_RTSP_packet('OK', seqno, self.session_id))
 
     # Waits until packet is received to return.
     def receive(self, timeout=None):
@@ -134,3 +146,56 @@ class Server():
         pieces = message.decode().split('|')
         command, seqno, session = pieces[0:3]  # first two elements always treated as msg type and seqno
         return command, seqno, session
+
+    # Reset all settings to default, frame counters back to zero, and close the streaming image file
+    def teardown(self):
+        pass
+
+    '''
+        Get the next frame of the movie file, break it up into packets, and send all those packets
+        across to the client. This sends one frame at a time.
+        1. Read frame into a bytestream.
+        2. Take 1459 bytes from the bytestream.
+        3. Send RTP packet with bytes from step 2 and current_RTP_seqno incremented by one.
+        4. Repeat steps 2 and 3 until the entire frame is sent.
+    '''
+    def send_next_frame(self):
+        pass
+
+
+if __name__ == "__main__":
+    def usage():
+        print ("Sender")
+        print ("-f FILE | --file=FILE The file to transfer; if empty reads from STDIN")
+        print ("-p PORT | --port=PORT The destination port, defaults to 33122")
+        print ("-a ADDRESS | --address=ADDRESS The receiver address or hostname, defaults to localhost")
+        print ("-d | --debug Print debug messages")
+        print ("-h | --help Print this usage message")
+
+    try:
+        opts, args = getopt.getopt(sys.argv[1:],
+                               "f:p:a:d", ["file=", "port=", "address=", "debug="])
+    except:
+        usage()
+        exit()
+
+    port = 33122
+    dest = "localhost"
+    filename = None
+    debug = False
+
+    for o,a in opts:
+        if o in ("-f", "--file="):
+            filename = a
+        elif o in ("-p", "--port="):
+            port = int(a)
+        elif o in ("-a", "--address="):
+            dest = a
+        elif o in ("-d", "--debug="):
+            debug = True
+
+    s = Server(dest,port,filename,debug)
+    try:
+        s.start()
+    except (KeyboardInterrupt, SystemExit):
+        exit()
