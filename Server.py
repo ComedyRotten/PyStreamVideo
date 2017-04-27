@@ -24,6 +24,7 @@ class Server():
         self.rtimeout = timeout
 
         self.current_state = 0
+        self.current_seqno = 0
 
         if filename == None:
             self.infile = sys.stdin
@@ -66,12 +67,22 @@ class Server():
             # if a message is received
             if message:
                 # Split the received packet up into it's individual parts
-                msg_type, seqno, data, checksum, command = self.split_packet(message)
+                command, seqno, session = self.split_packet(message)
 
                 # feed the retrieved command and info into the handler
-                self.MESSAGE_HANDLER.get(command)(seqnno, data)
+                self.MESSAGE_HANDLER.get(command)(seqno, session)
+        pass
 
+    def _handle_setup(self, seqno, session):
+        pass
 
+    def _handle_play(self, seqno, session):
+        pass
+
+    def _handle_pause(self, seqno, session):
+        pass
+
+    def _handle_teardown(self, seqno, session):
         pass
 
     # Waits until packet is received to return.
@@ -85,13 +96,7 @@ class Server():
     '''
     Sends a packet to the destination address.
     '''
-    def send_RTP(self, message, address=None):
-        if address is None:
-            address = (self.dest, self.dport)
-        self.sock.sendto(message.encode(), address)
-
-    # Sends a packet to the destination address.
-    def send_RTSP(self, message, address=None):
+    def send(self, message, address=None):
         if address is None:
             address = (self.dest, self.dport)
         self.sock.sendto(message.encode(), address)
@@ -100,29 +105,32 @@ class Server():
     Prepares an RTP packet to send
     Message format:
     The message is 1472 bytes divided up into the following:
-    
+        seqno:      2-byte sequence number
+        timestamp:  4-byte timestamp of the current time of the sent frame
+        SSRC:       4-byte unique identifier of the source of the stream (RTSP session id)
+        delimiters: 3 bytes
+        data:       1459 bytes of data
     '''
-    def make_RTP_packet(self, msg_type, seqno, msg):
-        body = "%s|%d|%s|" % (msg_type, seqno, msg)
-        packet = "%s%s" % (body)
-        return packet
+    def make_RTP_packet(self, seqno, timestamp, SSRC, data):
+        return "{0}|{1}|{2}|{3}".format(seqno, timestamp, SSRC, data)
 
     '''
-        Prepares an RTSP packet to send
+        Prepares an RTSP packet to send.
         Message format:
         The message is 1472 bytes divided up into the following:
-        
-        '''
-    def make_RTSP_packet(self, msg_type, seqno, msg):
-        body = "%s|%d|%s|" % (msg_type, seqno, msg)
-        packet = "%s%s" % (body)
-        return packet
+            Command: 32-byte string
+            CSeq:    32-bit integer same as what the client sent, increments by one
+            Transport: what it's going to send (RTP, unicast, client/server port, ssrc
+            Session: 32-bit Unique session id (we initialize this)
+            
+        The server only sends initial setup information and acknowledgements.
+        We probably don't need to send anything since this is just a very basic, P2P streaming video.
+    '''
+    def make_RTSP_packet(self, command, seqno, session):
+        return "{0}|{1}|{2}|".format(command, seqno, session)
 
     # Split and RTSP packet up into its appropriate pieces
-    def split_RTSP_packet(self, message):
-        print("Splitting message")
+    def split_packet(self, message):
         pieces = message.decode().split('|')
-        msg_type, seqno = pieces[0:2]  # first two elements always treated as msg type and seqno
-        checksum = pieces[-1]  # last is always treated as checksum
-        data = '|'.join(pieces[2:-1])  # everything in between is considered data
-        return msg_type, seqno, data, checksum
+        command, seqno, session = pieces[0:3]  # first two elements always treated as msg type and seqno
+        return command, seqno, session
