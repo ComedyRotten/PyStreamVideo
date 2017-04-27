@@ -4,6 +4,9 @@ from struct import *
 from PIL import Image, ImageTk
 import cv2
 import numpy as np
+import socket
+import time
+import sys
 
 '''
 The RTSP protocol is only for commands from the client to the server.
@@ -31,10 +34,26 @@ Thread 2: sending RTSP packets -> send commands via the GUI buttons. Only four c
 '''
 class MediaGui(Frame):
 
-    def __init__(self, master=None):
+    def __init__(self, dest, port, filename, listenport=33122, debug=False, timeout=10, master=None):
+        # Frame Setup
         Frame.__init__(self, master)
         self.master = master
         self.init_window()
+
+        # Connection Setup
+        self.dest = dest
+        self.dport = port
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.settimeout(None)  # blocking
+        self.sock.bind(('', random.randint(10000, 40000)))
+        self.rtimeout = timeout
+
+        # Sequence Numbers for RTSP and RTP packets
+        # These increment by 1
+        # If a frame is missed (noticeable by timestamp discrepency, the two frames on either side
+        # are each shown for an additional half of the time of the missing frame to hide it.
+        self.current_RTSP_seqno = 0
+        self.current_RTP_seqno = 0
 
     def init_window(self):
 
@@ -82,7 +101,7 @@ class MediaGui(Frame):
         self.setupButton = Button(self.controls_frame, text="Setup", command=self.setup_conn)
         self.setupButton.pack(side=LEFT, padx=2, pady=2)
 
-        self.playButton = Button(self.controls_frame, text="Play", command=self.show_image)
+        self.playButton = Button(self.controls_frame, text="Play", command=self.play_video)
         self.playButton.pack(side=LEFT, padx=2, pady=2)
 
         self.pauseButton = Button(self.controls_frame, text="Pause", command=self.pause_video)
@@ -104,6 +123,8 @@ class MediaGui(Frame):
     def teardown_conn(self):
         print("Teardown connection...")
 
+    # If a frame is missed (noticeable by timestamp discrepency, the two frames on either side
+    # are each shown for an additional half of the time of the missing frame to hide it.
     def play_video(self):
         print("Playing video...")
 
@@ -144,6 +165,50 @@ class MediaGui(Frame):
         # img = Label(self.media_frame, image=render)
         # img.image = render
         # img.place(x=0, y=0)
+        # Waits until packet is received to return.
+
+    def receive(self, timeout=None):
+        self.sock.settimeout(timeout)
+        try:
+            return self.sock.recv(4096)
+        except (socket.timeout, socket.error):
+            return None
+
+    '''
+    Sends a packet to the destination address.
+    '''
+    def send(self, message, address=None):
+        if address is None:
+            address = (self.dest, self.dport)
+        self.sock.sendto(message.encode(), address)
+
+    '''
+        Prepares an RTSP packet to send.
+        Message format:
+        The message is 1472 bytes divided up into the following:
+            Command: 32-byte string
+            CSeq:    32-bit integer same as what the client sent, increments by one
+            Transport: what it's going to send (RTP, unicast, client/server port, ssrc
+            Session: 32-bit Unique session id (we initialize this)
+
+        The server only sends initial setup information and acknowledgements.
+        We probably don't need to send anything since this is just a very basic, P2P streaming video.
+    '''
+    def make_RTSP_packet(self, command, seqno, transport, session):
+        return "{0}|{1}|{2}|{3}|".format(command, seqno, transport, session)
+
+    # Split and RTSP packet up into its appropriate pieces
+    def split_RTSP_packet(self, message):
+        pieces = message.decode().split('|')
+        command, seqno, transport, session = pieces[0:4]  # first two elements always treated as msg type and seqno
+        return command, seqno, transport, session
+
+    # Split an RTP packet up into its appropriate pieces
+    def split_packet(self, message):
+        pieces = message.decode().split('|')
+        seqno, timestamp, SSRC = pieces[0:3]  # first three elements always treated as msg type and seqno
+        data = b'|'.join(pieces[3:-1])  # everything in between is considered data
+        return seqno, timestamp, SSRC, data
 
 # Create a blank window
 root = Tk()

@@ -29,11 +29,8 @@ class Server():
         self.session_id = randint(0, 65535)
         self.current_RTSP_seqno = 0
         self.current_RTP_seqno = 0
-
-        if filename == None:
-            self.infile = sys.stdin
-        else:
-            self.infile = open(filename, "r")
+        self.current_frame_num = 0
+        self.current_timestamp = 0
 
         self.MESSAGE_HANDLER = {
             'SETUP': self._handle_setup,
@@ -75,7 +72,7 @@ class Server():
             # if a message is received
             if message:
                 # Split the received packet up into it's individual parts
-                command, seqno, session = self.split_packet(message)
+                command, seqno, transport, session = self.split_packet(message)
 
                 # feed the retrieved command and info into the handler
                 self.MESSAGE_HANDLER.get(command)(seqno, session)
@@ -123,8 +120,8 @@ class Server():
         delimiters: 3 bytes
         data:       1459 bytes of data
     '''
-    def make_RTP_packet(self, seqno, timestamp, SSRC, data):
-        return "{0}|{1}|{2}|{3}".format(seqno, timestamp, SSRC, data)
+    def make_rtp_packet(self, seqno, timestamp, ssrc, data):
+        return "{0}|{1}|{2}|{3}".format(seqno, timestamp, ssrc, data)
 
     '''
         Prepares an RTSP packet to send.
@@ -138,14 +135,14 @@ class Server():
         The server only sends initial setup information and acknowledgements.
         We probably don't need to send anything since this is just a very basic, P2P streaming video.
     '''
-    def make_RTSP_packet(self, command, seqno, session):
-        return "{0}|{1}|{2}|".format(command, seqno, session)
+    def make_RTSP_packet(self, command, seqno, transport, session):
+        return "{0}|{1}|{2}|{3}|".format(command, seqno, transport, session)
 
     # Split and RTSP packet up into its appropriate pieces
     def split_packet(self, message):
         pieces = message.decode().split('|')
-        command, seqno, session = pieces[0:3]  # first two elements always treated as msg type and seqno
-        return command, seqno, session
+        command, seqno, transport, session = pieces[0:4]  # first two elements always treated as msg type and seqno
+        return command, seqno, transport, session
 
     # Reset all settings to default, frame counters back to zero, and close the streaming image file
     def teardown(self):
@@ -160,7 +157,40 @@ class Server():
         4. Repeat steps 2 and 3 until the entire frame is sent.
     '''
     def send_next_frame(self):
-        pass
+        data = self.get_next_frame()
+        if data.__len__() <= 1459:
+            packet = self.make_rtp_packet(self.current_RTP_seqno, self.current_timestamp,
+                                 self.session_id, data)
+            self.send(packet)
+        else:
+            start = 0
+            end = 1459
+            while data.__len__() < end:
+                datagram = data[start:end]
+                packet = self.make_rtp_packet(self.current_RTP_seqno, self.current_timestamp,
+                                     self.session_id, datagram)
+                self.send(packet)
+                start = end
+                end = (end + 1459) if (data.__len__() >= end + 1459) else data.__len__()
+
+
+    def get_next_frame(self):
+        data = b''
+        # Gets the framelength of the next frame in bytes
+        frame_length_bytes = self.file.read(5)
+        if frame_length_bytes:
+            frame_length = int(frame_length_bytes)
+            # Read the bytes from the file that represent the next frame
+            data = self.file.read(frame_length)
+            self.current_frame_num += 1
+        return data
+
+    def init_video(self, filename):
+        try:
+            self.file = open(filename, "rb")
+        except:
+            print("ERROR: Unable to open file.")
+        self.current_frame_num = 0
 
 
 if __name__ == "__main__":
